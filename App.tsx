@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { AppState, AmazonListing } from './types.ts';
 import { generateAmazonListing } from './services/geminiService.ts';
@@ -5,17 +6,10 @@ import Header from './components/Header.tsx';
 import LoadingSpinner from './components/LoadingSpinner.tsx';
 import ListingCard from './components/ListingCard.tsx';
 
-// Define the AIStudio interface to match the environment's global type expectations
-interface AIStudio {
+// Define a local interface to maintain type safety without conflicting with existing global declarations
+interface AIStudioHelper {
   hasSelectedApiKey: () => Promise<boolean>;
   openSelectKey: () => Promise<void>;
-}
-
-declare global {
-  interface Window {
-    // Ensure the modifier and type match the environment's pre-defined aistudio property
-    readonly aistudio: AIStudio;
-  }
 }
 
 const App: React.FC = () => {
@@ -26,36 +20,53 @@ const App: React.FC = () => {
     isLoading: false,
     error: null,
   });
+  
+  const [isAiStudioEnv, setIsAiStudioEnv] = useState<boolean>(false);
   const [hasKey, setHasKey] = useState<boolean | null>(null);
 
+  // Safely access the aistudio object from the window to avoid TypeScript declaration conflicts
+  const getAiStudio = (): AIStudioHelper | undefined => {
+    return (window as any).aistudio;
+  };
+
   useEffect(() => {
-    const checkKey = async () => {
-      // Check for aistudio helper and its selected key status
-      if (window.aistudio) {
+    const checkKeyStatus = async () => {
+      const aistudio = getAiStudio();
+      if (aistudio && typeof aistudio.hasSelectedApiKey === 'function') {
+        setIsAiStudioEnv(true);
         try {
-          const selected = await window.aistudio.hasSelectedApiKey();
+          const selected = await aistudio.hasSelectedApiKey();
           setHasKey(selected);
         } catch (e) {
-          console.error("Error checking for API key:", e);
+          console.error("Error checking for API key via AIStudio:", e);
           setHasKey(false);
         }
       } else {
-        // Fallback for environments without the aistudio helper
-        setHasKey(!!process.env.API_KEY);
+        setIsAiStudioEnv(false);
+        // Check if key is already provided in environment
+        const envKey = process.env.API_KEY;
+        setHasKey(!!envKey && envKey !== 'undefined' && envKey !== '');
       }
     };
-    checkKey();
+    checkKeyStatus();
   }, []);
 
   const handleSelectKey = async () => {
-    if (window.aistudio) {
+    const aistudio = getAiStudio();
+    if (aistudio && typeof aistudio.openSelectKey === 'function') {
       try {
-        await window.aistudio.openSelectKey();
+        await aistudio.openSelectKey();
         // Assume key selection was successful per guidelines to mitigate race conditions
         setHasKey(true);
       } catch (e) {
         console.error("Error opening key selection dialog:", e);
+        setState(prev => ({ ...prev, error: "Could not open API key selection dialog." }));
       }
+    } else {
+      setState(prev => ({ 
+        ...prev, 
+        error: "API key selection helper is not available in this environment. Please ensure process.env.API_KEY is configured." 
+      }));
     }
   };
 
@@ -70,7 +81,6 @@ const App: React.FC = () => {
       const reader = new FileReader();
       reader.onload = (event) => {
         const result = event.target?.result as string;
-        // Extract base64 part from DataURL
         const base64 = result.split(',')[1];
         setState(prev => ({
           ...prev,
@@ -93,13 +103,14 @@ const App: React.FC = () => {
       setState(prev => ({ ...prev, listing, isLoading: false }));
     } catch (err: any) {
       const errorMessage = err.message || String(err);
-      // Reset key selection if the request fails due to an invalid/missing key session
-      if (errorMessage.includes("Requested entity was not found")) {
+      
+      // If the error indicates a missing project/key setup, prompt for re-selection if possible
+      if (errorMessage.includes("Requested entity was not found") || errorMessage.includes("API key not found")) {
         setHasKey(false);
         setState(prev => ({ 
           ...prev, 
           isLoading: false, 
-          error: "API key session expired. Please re-connect your key." 
+          error: "API key session expired or project not found. Please re-connect your key." 
         }));
       } else {
         setState(prev => ({ 
@@ -128,19 +139,26 @@ const App: React.FC = () => {
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 mt-12">
         {hasKey === false && (
           <div className="mb-8 bg-orange-50 border border-orange-200 rounded-2xl p-8 text-center animate-fade-in">
-            <h3 className="text-xl font-bold text-orange-900 mb-2">API Key Required</h3>
+            <h3 className="text-xl font-bold text-orange-900 mb-2">
+              {isAiStudioEnv ? "API Key Connection Required" : "Gemini API Key Missing"}
+            </h3>
             <p className="text-orange-700 mb-6 max-w-md mx-auto">
-              To use AI generation features, you must connect an API key from a paid Google Cloud project. 
+              {isAiStudioEnv 
+                ? "This app requires a valid API key from a paid Google Cloud project to analyze your product mockups."
+                : "The process.env.API_KEY is currently empty. Please configure your Gemini API Key in the project settings."}
               <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="underline ml-1">
                 Learn more about billing
               </a>.
             </p>
-            <button
-              onClick={handleSelectKey}
-              className="bg-orange-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-orange-700 transition-colors shadow-lg"
-            >
-              Connect API Key
-            </button>
+            
+            {isAiStudioEnv && (
+              <button
+                onClick={handleSelectKey}
+                className="bg-orange-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-orange-700 transition-all shadow-lg hover:-translate-y-1 active:translate-y-0"
+              >
+                Connect API Key
+              </button>
+            )}
           </div>
         )}
 
@@ -187,13 +205,13 @@ const App: React.FC = () => {
           )}
 
           {state.error && (
-            <div className="mt-6 bg-red-50 border-l-4 border-red-500 p-4 rounded-md">
+            <div className="mt-6 bg-red-50 border-l-4 border-red-500 p-4 rounded-md animate-fade-in">
               <div className="flex">
                 <div className="flex-shrink-0">
                   <svg className="h-5 w-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
                 </div>
                 <div className="ml-3">
-                  <p className="text-sm text-red-700">{state.error}</p>
+                  <p className="text-sm text-red-700 whitespace-pre-wrap">{state.error}</p>
                 </div>
               </div>
             </div>
@@ -205,10 +223,10 @@ const App: React.FC = () => {
                 onClick={handleGenerate}
                 disabled={hasKey === false}
                 className={`bg-gradient-to-r from-orange-600 to-orange-500 text-white px-8 py-4 rounded-full font-bold text-lg shadow-lg transition-all active:translate-y-0 ${
-                  hasKey === false ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-orange-200 hover:-translate-y-1'
+                  hasKey === false ? 'opacity-50 cursor-not-allowed grayscale' : 'hover:shadow-orange-200 hover:-translate-y-1'
                 }`}
               >
-                {hasKey === false ? 'Connect API Key to Generate' : 'Generate Optimized Listing'}
+                {hasKey === false ? 'API Key Required' : 'Generate Optimized Listing'}
               </button>
             </div>
           )}
@@ -226,7 +244,7 @@ const App: React.FC = () => {
               <h2 className="text-2xl font-bold text-gray-900">2. Your Optimized Content</h2>
               <button 
                 onClick={reset}
-                className="text-sm font-medium text-orange-600 hover:text-orange-700 flex items-center gap-1"
+                className="text-sm font-medium text-orange-600 hover:text-orange-700 flex items-center gap-1 transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                 Start Over
@@ -259,8 +277,8 @@ const App: React.FC = () => {
 
             <div className="mt-12 p-6 bg-orange-50 rounded-xl border border-orange-100">
               <h4 className="text-orange-800 font-bold mb-2">💡 Pro Tip</h4>
-              <p className="text-orange-700 text-sm">
-                For best results, always review the generated copy to ensure it aligns with your brand voice. Amazon's A10 algorithm values relevance and high click-through rates.
+              <p className="text-orange-700 text-sm leading-relaxed">
+                For best results, review the generated copy to ensure it aligns with your brand voice. Amazon's A10 algorithm values relevance and high click-through rates. These backend search terms should be added to your Seller Central account under the 'Keywords' tab.
               </p>
             </div>
           </section>
