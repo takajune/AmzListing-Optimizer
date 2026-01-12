@@ -1,10 +1,10 @@
 
 import React, { useState, useCallback } from 'react';
-import { AppState, AmazonListing } from './types';
-import { generateAmazonListing } from './services/geminiService';
-import Header from './components/Header';
-import LoadingSpinner from './components/LoadingSpinner';
-import ListingCard from './components/ListingCard';
+import { AppState, AmazonListing } from './types.ts';
+import { generateAmazonListing } from './services/geminiService.ts';
+import Header from './components/Header.tsx';
+import LoadingSpinner from './components/LoadingSpinner.tsx';
+import ListingCard from './components/ListingCard.tsx';
 
 const App: React.FC = () => {
   const [state, setState] = useState<AppState>({
