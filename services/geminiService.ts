@@ -2,13 +2,14 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AmazonListing } from "../types.ts";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
-
 export const generateAmazonListing = async (
   base64Image: string,
   mimeType: string
 ): Promise<AmazonListing> => {
-  const model = ai.models.generateContent({
+  // Instantiate GoogleGenAI right before the call to ensure the latest API key is used
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+  const result = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
     contents: [
       {
@@ -61,8 +62,7 @@ export const generateAmazonListing = async (
     },
   });
 
-  const response = await model;
-  const jsonStr = response.text || "";
+  const jsonStr = result.text || "";
   
   try {
     return JSON.parse(jsonStr) as AmazonListing;

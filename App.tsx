@@ -1,10 +1,22 @@
-
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppState, AmazonListing } from './types.ts';
 import { generateAmazonListing } from './services/geminiService.ts';
 import Header from './components/Header.tsx';
 import LoadingSpinner from './components/LoadingSpinner.tsx';
 import ListingCard from './components/ListingCard.tsx';
+
+// Define the AIStudio interface to match the environment's global type expectations
+interface AIStudio {
+  hasSelectedApiKey: () => Promise<boolean>;
+  openSelectKey: () => Promise<void>;
+}
+
+declare global {
+  interface Window {
+    // Ensure the modifier and type match the environment's pre-defined aistudio property
+    readonly aistudio: AIStudio;
+  }
+}
 
 const App: React.FC = () => {
   const [state, setState] = useState<AppState>({
@@ -14,6 +26,38 @@ const App: React.FC = () => {
     isLoading: false,
     error: null,
   });
+  const [hasKey, setHasKey] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const checkKey = async () => {
+      // Check for aistudio helper and its selected key status
+      if (window.aistudio) {
+        try {
+          const selected = await window.aistudio.hasSelectedApiKey();
+          setHasKey(selected);
+        } catch (e) {
+          console.error("Error checking for API key:", e);
+          setHasKey(false);
+        }
+      } else {
+        // Fallback for environments without the aistudio helper
+        setHasKey(!!process.env.API_KEY);
+      }
+    };
+    checkKey();
+  }, []);
+
+  const handleSelectKey = async () => {
+    if (window.aistudio) {
+      try {
+        await window.aistudio.openSelectKey();
+        // Assume key selection was successful per guidelines to mitigate race conditions
+        setHasKey(true);
+      } catch (e) {
+        console.error("Error opening key selection dialog:", e);
+      }
+    }
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -26,6 +70,7 @@ const App: React.FC = () => {
       const reader = new FileReader();
       reader.onload = (event) => {
         const result = event.target?.result as string;
+        // Extract base64 part from DataURL
         const base64 = result.split(',')[1];
         setState(prev => ({
           ...prev,
@@ -47,11 +92,22 @@ const App: React.FC = () => {
       const listing = await generateAmazonListing(state.image, state.mimeType);
       setState(prev => ({ ...prev, listing, isLoading: false }));
     } catch (err: any) {
-      setState(prev => ({ 
-        ...prev, 
-        isLoading: false, 
-        error: err.message || "Failed to generate listing. Please try again." 
-      }));
+      const errorMessage = err.message || String(err);
+      // Reset key selection if the request fails due to an invalid/missing key session
+      if (errorMessage.includes("Requested entity was not found")) {
+        setHasKey(false);
+        setState(prev => ({ 
+          ...prev, 
+          isLoading: false, 
+          error: "API key session expired. Please re-connect your key." 
+        }));
+      } else {
+        setState(prev => ({ 
+          ...prev, 
+          isLoading: false, 
+          error: errorMessage || "Failed to generate listing. Please try again." 
+        }));
+      }
     }
   };
 
@@ -66,10 +122,28 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen pb-20">
+    <div className="min-h-screen pb-20 bg-gray-50">
       <Header />
       
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 mt-12">
+        {hasKey === false && (
+          <div className="mb-8 bg-orange-50 border border-orange-200 rounded-2xl p-8 text-center animate-fade-in">
+            <h3 className="text-xl font-bold text-orange-900 mb-2">API Key Required</h3>
+            <p className="text-orange-700 mb-6 max-w-md mx-auto">
+              To use AI generation features, you must connect an API key from a paid Google Cloud project. 
+              <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="underline ml-1">
+                Learn more about billing
+              </a>.
+            </p>
+            <button
+              onClick={handleSelectKey}
+              className="bg-orange-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-orange-700 transition-colors shadow-lg"
+            >
+              Connect API Key
+            </button>
+          </div>
+        )}
+
         <section className="bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-gray-900 mb-2">1. Upload Your Mockup</h2>
@@ -129,9 +203,12 @@ const App: React.FC = () => {
             <div className="mt-8 flex justify-center">
               <button
                 onClick={handleGenerate}
-                className="bg-gradient-to-r from-orange-600 to-orange-500 text-white px-8 py-4 rounded-full font-bold text-lg shadow-lg hover:shadow-orange-200 hover:-translate-y-1 transition-all active:translate-y-0"
+                disabled={hasKey === false}
+                className={`bg-gradient-to-r from-orange-600 to-orange-500 text-white px-8 py-4 rounded-full font-bold text-lg shadow-lg transition-all active:translate-y-0 ${
+                  hasKey === false ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-orange-200 hover:-translate-y-1'
+                }`}
               >
-                Generate Optimized Listing
+                {hasKey === false ? 'Connect API Key to Generate' : 'Generate Optimized Listing'}
               </button>
             </div>
           )}
@@ -191,7 +268,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="mt-20 py-8 border-t border-gray-200 text-center text-gray-400 text-sm">
-        <p>&copy; {new Date().getFullYear()} AmzListing Optimizer. Powered by Gemini Pro Vision.</p>
+        <p>&copy; {new Date().getFullYear()} AmzListing Optimizer. Powered by Gemini.</p>
       </footer>
 
       <style>{`
