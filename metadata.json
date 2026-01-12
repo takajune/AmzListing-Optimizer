@@ -1,0 +1,5 @@
+{
+  "name": "AmzListing Optimizer",
+  "description": "An AI-powered Amazon listing generator that creates optimized titles, bullet points, descriptions, and backend keywords from product mockups.",
+  "requestFramePermissions": []
+}
